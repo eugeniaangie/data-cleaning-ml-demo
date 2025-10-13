@@ -46,6 +46,8 @@ python generate_sample_data.py
 # Detect duplicates
 python duplicate_checker.py
 
+```
+
 ## 📁 Project Structure
 
 ```
