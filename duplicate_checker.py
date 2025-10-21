@@ -143,15 +143,20 @@ class DuplicateChecker:
             with self.engine.connect() as conn:
                 from sqlalchemy import text
                 
-                # Insert duplicate log records
+                # Insert duplicate log records 
                 for dup in duplicates:
+                    name1 = dup['location_1']['name']
+                    name2 = dup['location_2']['name']
+                    
+                    print(f"🔍 Logging duplicate: '{name1}' vs '{name2}'")
+                    
                     conn.execute(text("""
                         INSERT INTO duplicate_log 
                         (location_id_1, location_id_2, similarity_score, distance_meters, action_taken)
                         VALUES (:loc1, :loc2, :similarity, :distance, :action)
                     """), {
-                        'loc1': int(dup['location_1']['id']),
-                        'loc2': int(dup['location_2']['id']),
+                        'loc1': name1,
+                        'loc2': name2,
                         'similarity': float(dup['similarity_score']),
                         'distance': float(dup['distance_meters']),
                         'action': 'removed_duplicate'
@@ -223,7 +228,7 @@ class DuplicateChecker:
         social_df.to_sql('social_metrics', self.engine, if_exists='append', index=False)
         print(f"💾 Inserted {len(social_df)} social metrics records")
     
-    def save_to_database(self, df, table_name='locations'):
+    def save_to_database(self, df, duplicates=None, table_name='locations'):
         """Save cleaned data ke database"""
         if self.engine is None:
             print("⚠️  No database connection. Saving to CSV instead...")
@@ -243,7 +248,6 @@ class DuplicateChecker:
                 from sqlalchemy import text
                 
                 # Delete existing data (handle foreign key constraints)
-                conn.execute(text("DELETE FROM duplicate_log"))
                 conn.execute(text("DELETE FROM prices"))
                 conn.execute(text("DELETE FROM social_metrics"))
                 conn.execute(text(f"DELETE FROM {table_name}"))
@@ -285,7 +289,7 @@ def main():
         print(f"\n🎯 Found {len(duplicates)} potential duplicates")
         print("🧹 Auto-cleaning duplicates...")
         
-        # Log duplicates to database
+         # Log duplicates to database
         checker.log_duplicates_to_db(duplicates)
         
         # clean duplicates

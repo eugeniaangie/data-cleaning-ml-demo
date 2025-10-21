@@ -40,8 +40,8 @@ CREATE TABLE IF NOT EXISTS social_metrics (
 -- Table 4: Duplicate Detection Log
 CREATE TABLE IF NOT EXISTS duplicate_log (
     id SERIAL PRIMARY KEY,
-    location_id_1 INTEGER REFERENCES locations(id),
-    location_id_2 INTEGER REFERENCES locations(id),
+    location_id_1 TEXT,
+    location_id_2 TEXT,
     similarity_score DECIMAL(5, 2),
     distance_meters DECIMAL(10, 2),
     action_taken VARCHAR(50),
