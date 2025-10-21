@@ -2,6 +2,13 @@ import pandas as pd
 import numpy as np
 import random
 from datetime import datetime, timedelta
+import hashlib
+from sqlalchemy import create_engine
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 def generate_coffee_shop_data(n_shops=50):
     """Generate sample coffee shop data dengan beberapa duplicate"""
@@ -35,7 +42,7 @@ def generate_coffee_shop_data(n_shops=50):
         lat_variation = random.uniform(-0.01, 0.01)
         lon_variation = random.uniform(-0.01, 0.01)
         
-        # Generate realistic data
+        # Generate realistic data (matching database schema)
         shop_data = {
             'id': i + 1,
             'name': f"{chain} {area['name']}",
@@ -45,13 +52,15 @@ def generate_coffee_shop_data(n_shops=50):
             'area_sqm': random.randint(50, 200),
             'rating': round(random.uniform(3.5, 5.0), 1),
             'followers': random.randint(5000, 50000),
-            'price_per_sqm': random.randint(150000, 400000),
-            'monthly_rent': 0,  # Will calculate later
             'created_at': datetime.now() - timedelta(days=random.randint(1, 365))
         }
         
-        # Calculate monthly rent
-        shop_data['monthly_rent'] = shop_data['price_per_sqm'] * shop_data['area_sqm']
+        # Generate price data
+        price_per_sqm = random.randint(150000, 400000)
+        monthly_rent = price_per_sqm * shop_data['area_sqm']
+        
+        # Generate social metrics
+        engagement_rate = round(random.uniform(2.0, 8.0), 2)
         
         data.append(shop_data)
     
@@ -91,11 +100,8 @@ def generate_coffee_shop_data(n_shops=50):
             'area_sqm': random.randint(80, 150),
             'rating': round(random.uniform(4.0, 5.0), 1),
             'followers': random.randint(10000, 30000),
-            'price_per_sqm': random.randint(200000, 350000),
-            'monthly_rent': 0,
             'created_at': datetime.now() - timedelta(days=random.randint(1, 365))
         }
-        orig_data['monthly_rent'] = orig_data['price_per_sqm'] * orig_data['area_sqm']
         data.append(orig_data)
         
         # Duplicate
@@ -108,11 +114,8 @@ def generate_coffee_shop_data(n_shops=50):
             'area_sqm': orig_data['area_sqm'] + random.randint(-10, 10),  # Slightly different
             'rating': orig_data['rating'] + random.uniform(-0.2, 0.2),
             'followers': orig_data['followers'] + random.randint(-5000, 5000),
-            'price_per_sqm': orig_data['price_per_sqm'] + random.randint(-50000, 50000),
-            'monthly_rent': 0,
             'created_at': datetime.now() - timedelta(days=random.randint(1, 365))
         }
-        dup_data['monthly_rent'] = dup_data['price_per_sqm'] * dup_data['area_sqm']
         data.append(dup_data)
     
     # Convert to DataFrame
@@ -125,6 +128,85 @@ def generate_coffee_shop_data(n_shops=50):
     df['id'] = range(1, len(df) + 1)
     
     return df
+
+def save_to_database(df, table_name='locations'):
+    """Save generated data to database"""
+    # Try to get database config from environment
+    db_config = {
+        'host': os.getenv('DB_HOST', 'localhost'),
+        'port': os.getenv('DB_PORT', '5432'),
+        'database': os.getenv('DB_NAME', 'coffee_shop_db'),
+        'user': os.getenv('DB_USER', 'postgres'),
+        'password': os.getenv('DB_PASSWORD', 'password')
+    }
+    
+    try:
+        # Create database connection
+        engine = create_engine(
+            f"postgresql://{db_config['user']}:{db_config['password']}@"
+            f"{db_config['host']}:{db_config['port']}/{db_config['database']}"
+        )
+        
+        # Generate data hash untuk setiap row
+        df['data_hash'] = df.apply(
+            lambda row: hashlib.md5(
+                f"{row['name'].lower()}_{row['latitude']}_{row['longitude']}".encode()
+            ).hexdigest(), axis=1
+        )
+        
+        # Clear existing data dan insert new data
+        with engine.connect() as conn:
+            from sqlalchemy import text
+            
+            # Delete existing data from all tables
+            conn.execute(text("DELETE FROM prices"))
+            conn.execute(text("DELETE FROM social_metrics"))
+            conn.execute(text("DELETE FROM duplicate_log"))
+            conn.execute(text(f"DELETE FROM {table_name}"))
+            conn.commit()
+            
+            # Insert locations
+            df.to_sql(table_name, engine, if_exists='append', index=False)
+            print(f"💾 Inserted {len(df)} locations to database")
+            
+            # Insert prices data
+            prices_data = []
+            for _, row in df.iterrows():
+                price_per_sqm = random.randint(150000, 400000)
+                monthly_rent = price_per_sqm * row['area_sqm']
+                prices_data.append({
+                    'location_id': row['id'],
+                    'monthly_rent': monthly_rent,
+                    'price_per_sqm': price_per_sqm,
+                    'date_recorded': datetime.now().date(),
+                    'source': 'generated'
+                })
+            
+            prices_df = pd.DataFrame(prices_data)
+            prices_df.to_sql('prices', engine, if_exists='append', index=False)
+            print(f"💾 Inserted {len(prices_df)} price records")
+            
+            # Insert social metrics data
+            social_data = []
+            for _, row in df.iterrows():
+                social_data.append({
+                    'location_id': row['id'],
+                    'platform': 'instagram',
+                    'followers': row['followers'],
+                    'engagement_rate': round(random.uniform(2.0, 8.0), 2),
+                    'last_updated': datetime.now()
+                })
+            
+            social_df = pd.DataFrame(social_data)
+            social_df.to_sql('social_metrics', engine, if_exists='append', index=False)
+            print(f"💾 Inserted {len(social_df)} social metrics records")
+            
+        return True
+        
+    except Exception as e:
+        print(f"❌ Database error: {e}")
+        print("💡 Make sure database is running and configured properly")
+        return False
 
 def main():
     """Generate dan save sample data"""
@@ -139,9 +221,16 @@ def main():
     print(f"✅ Generated {len(df)} coffee shops")
     print(f"💾 Saved to coffee_shop_data.csv")
     
+    # Try to save to database
+    print("\n🗄️  Attempting to save to database...")
+    db_success = save_to_database(df)
+    
+    if not db_success:
+        print("⚠️  Database not available, data saved to CSV only")
+    
     # Show sample data
     print("\n📊 Sample Data:")
-    print(df[['name', 'latitude', 'longitude', 'area_sqm', 'price_per_sqm']].head(10))
+    print(df[['name', 'latitude', 'longitude', 'area_sqm', 'rating']].head(10))
     
     # Show potential duplicates
     print("\n🔍 Potential Duplicates (for testing):")
